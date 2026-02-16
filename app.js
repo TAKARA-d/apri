@@ -1,131 +1,152 @@
-import React, { useMemo, useState } from 'https://esm.sh/react@18.2.0';
+import React, { useEffect, useMemo, useState } from 'https://esm.sh/react@18.2.0';
 import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-import { NasdaqLearningEngine } from './engine.js';
+import { analyzeMarket } from './engine.js';
 
 const h = React.createElement;
-const SAVE_KEY = 'nasdaq100-intel-lab-v1';
 
-function fmt(num, d = 2) {
-  return Number(num).toLocaleString('ja-JP', { maximumFractionDigits: d, minimumFractionDigits: d });
+function fmt(n, d = 2) {
+  return Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 
-function Sparkline({ values }) {
-  const w = 520;
-  const hgt = 120;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+function LineChart({ data, color = '#60a5fa', height = 180 }) {
+  if (!data.length) return h('div', { className: 'empty' }, 'データなし');
+  const width = 900;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
   const range = Math.max(1e-6, max - min);
-  const points = values.map((v, i) => `${(i / (values.length - 1)) * w},${hgt - ((v - min) / range) * hgt}`).join(' ');
-  return h('svg', { viewBox: `0 0 ${w} ${hgt}`, className: 'sparkline' },
-    h('polyline', { fill: 'none', stroke: '#60a5fa', strokeWidth: 2.5, points }),
+  const points = data.map((v, i) => `${(i / (data.length - 1)) * width},${height - ((v - min) / range) * height}`).join(' ');
+  return h('svg', { viewBox: `0 0 ${width} ${height}`, className: 'chart' },
+    h('polyline', { points, fill: 'none', stroke: color, strokeWidth: 3 }),
+  );
+}
+
+function Bars({ values }) {
+  if (!values.length) return h('div', { className: 'empty' }, 'データなし');
+  const width = 900;
+  const height = 180;
+  const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
+  const barW = width / values.length;
+  return h('svg', { viewBox: `0 0 ${width} ${height}`, className: 'chart' },
+    ...values.map((v, i) => {
+      const hgt = Math.abs(v) / maxAbs * (height / 2 - 4);
+      const y = v >= 0 ? height / 2 - hgt : height / 2;
+      return h('rect', {
+        key: i,
+        x: i * barW + 1,
+        y,
+        width: Math.max(1, barW - 2),
+        height: hgt,
+        fill: v >= 0 ? '#34d399' : '#f87171',
+      });
+    }),
+    h('line', { x1: 0, y1: height / 2, x2: width, y2: height / 2, stroke: '#334155' }),
   );
 }
 
 function App() {
-  const [engine, setEngine] = useState(() => new NasdaqLearningEngine(42));
-  const [log, setLog] = useState('Initialized with 1 year historical data.');
+  const [marketRows, setMarketRows] = useState([]);
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [refreshedAt, setRefreshedAt] = useState('');
+  const [sources, setSources] = useState({ market: '-', news: '-' });
 
-  const current = engine.current();
-  const prediction = useMemo(() => engine.predictHorizon(20), [engine, engine.day]);
-  const backtest = useMemo(() => engine.backtest(60), [engine, engine.day]);
-  const diagnostics = useMemo(() => engine.modelDiagnostics(), [engine, engine.day]);
-  const prices = engine.records.slice(-120).map((d) => d.price);
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [m, n] = await Promise.all([
+        fetch('/api/market').then((r) => r.json()),
+        fetch('/api/news').then((r) => r.json()),
+      ]);
+      if (m.error) throw new Error(`market: ${m.error}`);
+      if (n.error) throw new Error(`news: ${n.error}`);
+      setMarketRows(m.rows || []);
+      setNews(n.news || []);
+      setSources({ market: m.source || 'unknown', news: n.source || 'unknown' });
+      setRefreshedAt(new Date().toLocaleString('ja-JP'));
+    } catch (e) {
+      setError(e.message || 'データ取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  function mutate(action, msg) {
-    const clone = NasdaqLearningEngine.fromSerialized(engine.serialize());
-    action(clone);
-    setEngine(clone);
-    setLog(msg(clone));
-  }
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 1000 * 60 * 30);
+    return () => clearInterval(timer);
+  }, []);
+
+  const result = useMemo(() => (marketRows.length ? analyzeMarket(marketRows, news) : null), [marketRows, news]);
 
   return h('div', { className: 'page' },
     h('header', { className: 'hero' },
-      h('h1', null, 'NASDAQ100 Intelligence Lab'),
-      h('p', null, '1年指標トレンド分析 + ニュース吸収 + 日次オンライン学習で予測精度を継続改善するReactアプリ'),
+      h('h1', null, 'NASDAQ100 インテリジェンス分析ダッシュボード'),
+      h('p', null, '実データ + 実ニュース（日本語）を使った予測分析アプリ。ニュース/指標更新で再学習します。'),
+      h('div', { className: 'top-actions' },
+        h('button', { onClick: load, disabled: loading }, loading ? '更新中...' : '最新データ再取得'),
+        h('span', { className: 'refreshed' }, refreshedAt ? `最終更新: ${refreshedAt} / market:${sources.market} news:${sources.news}` : '未更新'),
+      ),
+      error ? h('p', { className: 'error' }, error) : null,
     ),
 
-    h('section', { className: 'panel actions' },
-      h('button', { onClick: () => mutate((e) => { e.generateDailyNews(); e.stepDay(); }, (e) => `Day ${e.day}: ニュース吸収と学習を実施`) }, '1日進めて学習'),
-      h('button', { onClick: () => mutate((e) => { for (let i = 0; i < 5; i += 1) { e.generateDailyNews(); e.stepDay(); } }, (e) => `Day ${e.day}: 5日分の更新完了`) }, '5日進める'),
-      h('button', { onClick: () => mutate((e) => { for (let i = 0; i < 22; i += 1) { e.generateDailyNews(); e.stepDay(); } }, (e) => `Day ${e.day}: 1か月進める`) }, '1か月進める'),
-      h('button', { onClick: () => { localStorage.setItem(SAVE_KEY, engine.serialize()); setLog('保存しました。'); } }, '保存'),
-      h('button', {
-        onClick: () => {
-          const raw = localStorage.getItem(SAVE_KEY);
-          if (!raw) return setLog('保存データがありません。');
-          setEngine(NasdaqLearningEngine.fromSerialized(raw));
-          setLog('保存データを復元しました。');
-        },
-      }, '復元'),
-      h('button', { onClick: () => { setEngine(new NasdaqLearningEngine(42)); setLog('モデルをリセットしました。'); } }, 'リセット'),
-      h('p', { className: 'status' }, log),
-    ),
-
-    h('section', { className: 'grid' },
-      h('article', { className: 'panel' },
-        h('h2', null, `現在値 (Day ${engine.day})`),
-        h('ul', { className: 'kv' },
-          h('li', null, h('span', null, 'NASDAQ100'), h('strong', null, fmt(current.price, 1))),
-          h('li', null, h('span', null, '日次リターン'), h('strong', null, `${fmt(current.returnPct)}%`)),
-          h('li', null, h('span', null, 'VIX'), h('strong', null, fmt(current.vix))),
-          h('li', null, h('span', null, 'RSI'), h('strong', null, fmt(current.rsi))),
-          h('li', null, h('span', null, 'MACD'), h('strong', null, fmt(current.macd))),
-          h('li', null, h('span', null, 'Breadth'), h('strong', null, fmt(current.breadth))),
-          h('li', null, h('span', null, 'Rates'), h('strong', null, `${fmt(current.rates)}%`)),
-          h('li', null, h('span', null, 'News Sentiment'), h('strong', null, fmt(current.newsSentiment))),
+    !result ? h('section', { className: 'panel' }, '読み込み中...') : h(React.Fragment, null,
+      h('section', { className: 'grid' },
+        h('article', { className: 'panel' },
+          h('h2', null, '現況サマリー'),
+          h('div', { className: 'stats' },
+            h('div', null, h('label', null, '終値'), h('strong', null, fmt(result.latest.close, 1))),
+            h('div', null, h('label', null, '日次騰落率'), h('strong', null, `${fmt(result.latest.ret)}%`)),
+            h('div', null, h('label', null, 'RSI(14)'), h('strong', null, fmt(result.latest.rsi14))),
+            h('div', null, h('label', null, 'MACD'), h('strong', null, fmt(result.latest.macd, 2))),
+            h('div', null, h('label', null, '20日ボラ'), h('strong', null, fmt(result.latest.vol20, 3))),
+            h('div', null, h('label', null, 'ニュース平均センチメント'), h('strong', null, fmt(result.news.reduce((a,b)=>a+b.sentiment,0)/Math.max(1,result.news.length), 2))),
+          ),
         ),
-      ),
-
-      h('article', { className: 'panel' },
-        h('h2', null, '20営業日予測'),
-        h('ul', { className: 'kv' },
-          h('li', null, h('span', null, 'レジーム'), h('strong', null, prediction.regime)),
-          h('li', null, h('span', null, '期待騰落率'), h('strong', null, `${fmt(prediction.expectedMovePct)}%`)),
-          h('li', null, h('span', null, '予想価格'), h('strong', null, fmt(prediction.expectedPrice, 1))),
-          h('li', null, h('span', null, '信頼度'), h('strong', null, `${fmt(prediction.confidence, 1)} / 100`)),
-          h('li', null, h('span', null, 'モデルスコア'), h('strong', null, fmt(prediction.score, 3))),
-        ),
-      ),
-
-      h('article', { className: 'panel wide' },
-        h('h2', null, '価格トレンド（過去120日）'),
-        h(Sparkline, { values: prices }),
-      ),
-
-      h('article', { className: 'panel' },
-        h('h2', null, '直近60日 統計解析'),
-        h('ul', { className: 'kv' },
-          h('li', null, h('span', null, '平均日次リターン'), h('strong', null, `${fmt(backtest.avgReturnPct)}%`)),
-          h('li', null, h('span', null, '年率換算ボラ'), h('strong', null, `${fmt(backtest.annualizedVolPct)}%`)),
-          h('li', null, h('span', null, '上昇日比率'), h('strong', null, `${fmt(backtest.upDayRatio * 100)}%`)),
-          h('li', null, h('span', null, '期間トレンド'), h('strong', null, `${fmt(backtest.windowTrendPct)}%`)),
-          h('li', null, h('span', null, '学習率'), h('strong', null, fmt(engine.learningRate, 4))),
-        ),
-      ),
-
-      h('article', { className: 'panel' },
-        h('h2', null, '特徴量重要度'),
-        h('table', { className: 'weights' },
-          h('thead', null, h('tr', null, h('th', null, 'Feature'), h('th', null, 'Weight'), h('th', null, 'Importance'))),
-          h('tbody', null,
-            ...diagnostics.map((d) => h('tr', { key: d.feature },
-              h('td', null, d.feature),
-              h('td', null, fmt(d.weight, 3)),
-              h('td', null, `${fmt(d.importance * 100, 1)}%`),
-            )),
+        h('article', { className: 'panel' },
+          h('h2', null, '予測（本気分析）'),
+          h('div', { className: 'stats' },
+            h('div', null, h('label', null, '翌営業日予測騰落率'), h('strong', null, `${fmt(result.forecast.nextDayReturnPct)}%`)),
+            h('div', null, h('label', null, '翌営業日予想終値'), h('strong', null, fmt(result.forecast.nextDayPrice, 1))),
+            h('div', null, h('label', null, '20営業日予測騰落率'), h('strong', null, `${fmt(result.forecast.expected20DayMovePct)}%`)),
+            h('div', null, h('label', null, '20営業日予想終値'), h('strong', null, fmt(result.forecast.expected20DayPrice, 1))),
+            h('div', null, h('label', null, '予測信頼度'), h('strong', null, `${fmt(result.forecast.confidence, 1)} / 100`)),
+            h('div', null, h('label', null, 'テスト方向一致率'), h('strong', null, `${fmt(result.model.testScore.hitRate * 100, 1)}%`)),
           ),
         ),
       ),
 
-      h('article', { className: 'panel wide' },
-        h('h2', null, 'ニュースフィード（最新12件）'),
-        h('ul', { className: 'news' },
-          ...engine.newsFeed.slice(0, 12).map((n, idx) => h('li', { key: `${n.day}-${idx}` },
-            h('span', { className: 'news-day' }, `Day ${n.day}`),
-            h('span', { className: 'news-headline' }, n.headline),
-            h('span', { className: `tone ${n.sentiment >= 0 ? 'pos' : 'neg'}` }, `sent ${fmt(n.sentiment, 2)}`),
-            h('span', { className: 'impact' }, `impact ${fmt(n.impact, 2)}`),
-          )),
+      h('section', { className: 'panel' },
+        h('h2', null, 'NASDAQ100 終値チャート（約1年）'),
+        h(LineChart, { data: result.closes }),
+      ),
+
+      h('section', { className: 'panel' },
+        h('h2', null, '日次リターン分布（直近120日）'),
+        h(Bars, { values: result.returns.slice(-120) }),
+      ),
+
+      h('section', { className: 'grid' },
+        h('article', { className: 'panel' },
+          h('h2', null, 'モデル係数'),
+          h('table', { className: 'tbl' },
+            h('thead', null, h('tr', null, h('th', null, '指標'), h('th', null, '重み'))),
+            h('tbody', null,
+              ...Object.entries(result.model.weights).map(([k, v]) => h('tr', { key: k }, h('td', null, k), h('td', null, fmt(v, 4)))),
+            ),
+          ),
+          h('p', { className: 'muted' }, `Train MAE: ${fmt(result.model.trainScore.mae, 4)} / Test MAE: ${fmt(result.model.testScore.mae, 4)}`),
+        ),
+        h('article', { className: 'panel' },
+          h('h2', null, '日本語ニュース（実取得）'),
+          h('ul', { className: 'news' },
+            ...result.news.slice(0, 15).map((n, i) => h('li', { key: `${n.link}-${i}` },
+              h('a', { href: n.link, target: '_blank', rel: 'noreferrer' }, n.title),
+              h('span', { className: `tone ${n.sentiment >= 0 ? 'pos' : 'neg'}` }, `sent: ${fmt(n.sentiment, 2)}`),
+              h('small', null, n.pubDate || ''),
+            )),
+          ),
         ),
       ),
     ),

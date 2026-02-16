@@ -1,31 +1,33 @@
-# NASDAQ100 Intelligence Lab (React)
+# NASDAQ100 Intelligence Lab（本番志向版）
 
-NASDAQ100の1年分指標トレンドを分析し、ニュースを日々吸収してモデル重みを更新しながら将来値を予測する、**React製の分析アプリ**です。
+ゲーム的な挙動を廃止し、**実ニュース（日本語）+ 実市場データ**を取り込んで予測分析するReactアプリです。
 
-## できること
+## 何が変わったか
 
-- 1年（252営業日）分の市場データをベースに分析
-- 指標: 価格 / 日次リターン / RSI / MACD / VIX / Breadth / 金利 / 出来高トレンド
-- 20営業日先の予測（期待騰落率・予想価格・信頼度・市場レジーム）
-- ニュースセンチメント自動生成と影響度反映
-- 日次オンライン学習（予測誤差で特徴量重みを更新）
-- 特徴量重要度の可視化
-- 保存/復元（localStorage）
-
-## 技術
-
-- UI: React 18（ESM import）
-- ロジック: 純粋JavaScript (`engine.js`)
-- スタイル: CSS
-- テスト: Node.js test runner
+- 実ネットニュース取得（日本語RSS）
+  - NHK 経済
+  - NHK 国際
+  - Reuters JP ビジネス
+- 実市場データ取得
+  - NASDAQ100 日次履歴（stooq）
+- 指標分析
+  - 日次リターン / モメンタム / RSI(14) / MACD / 20日ボラティリティ
+- 予測モデル
+  - 線形モデルを学習し、翌営業日と20営業日先を予測
+  - Train/Test で MAE と方向一致率を表示
+  - ニュースセンチメント（日本語辞書）を特徴量に統合
+- UI
+  - Reactダッシュボード
+  - 価格ラインチャート、リターンバー、係数テーブル、ニュースパネル
+  - 30分ごとの自動更新 + 手動更新
 
 ## 起動
 
 ```bash
-python3 -m http.server 8000
+node server.mjs
 ```
 
-`http://localhost:8000` にアクセスしてください。
+`http://localhost:8000`
 
 ## テスト
 
@@ -33,10 +35,10 @@ python3 -m http.server 8000
 node --test tests/test_engine.mjs
 ```
 
-## 主要ファイル
+## 構成
 
-- `index.html`: アプリエントリ
-- `app.js`: React UI
-- `engine.js`: 分析・予測・学習エンジン
-- `styles.css`: ダッシュボードスタイル
-- `tests/test_engine.mjs`: エンジン検証
+- `server.mjs` API + 静的配信
+- `app.js` React UI
+- `engine.js` 指標計算・学習・予測
+- `styles.css` UIデザイン
+- `tests/test_engine.mjs` 分析ロジックテスト

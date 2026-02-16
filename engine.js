@@ -1,276 +1,150 @@
-export function createRng(seed = 42) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-}
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
 function mean(values) {
-  return values.reduce((a, b) => a + b, 0) / Math.max(1, values.length);
+  if (!values.length) return 0;
+  return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-function stdDev(values) {
+function std(values) {
   const m = mean(values);
-  const v = mean(values.map((x) => (x - m) ** 2));
-  return Math.sqrt(v);
+  return Math.sqrt(mean(values.map((x) => (x - m) ** 2)));
 }
 
-export class NasdaqLearningEngine {
-  constructor(seed = 42) {
-    this.rng = createRng(seed);
-    this.day = 0;
-    this.records = [];
-    this.newsFeed = [];
-    this.weights = {
-      momentum: 0.9,
-      rsi: -0.35,
-      macd: 0.75,
-      vix: -0.65,
-      breadth: 0.45,
-      rates: -0.55,
-      volumeTrend: 0.2,
-      newsSentiment: 0.8,
-    };
-    this.learningRate = 0.015;
-    this.lastPrediction = null;
-    this.initializeYear();
+function ema(values, period) {
+  if (!values.length) return [];
+  const k = 2 / (period + 1);
+  const out = [values[0]];
+  for (let i = 1; i < values.length; i += 1) out.push(values[i] * k + out[i - 1] * (1 - k));
+  return out;
+}
+
+function rsi(closes, period = 14) {
+  const out = new Array(closes.length).fill(50);
+  for (let i = period; i < closes.length; i += 1) {
+    const diffs = [];
+    for (let j = i - period + 1; j <= i; j += 1) diffs.push(closes[j] - closes[j - 1]);
+    const gains = diffs.filter((x) => x > 0);
+    const losses = diffs.filter((x) => x < 0).map(Math.abs);
+    const rs = (mean(gains) || 0.001) / (mean(losses) || 0.001);
+    out[i] = 100 - 100 / (1 + rs);
   }
+  return out;
+}
 
-  initializeYear(days = 252) {
-    let price = 17600;
-    let ema12 = price;
-    let ema26 = price;
+const POS_WORDS = ['上昇', '改善', '好調', '最高', '成長', '拡大', '増益', '強気', '回復', '追い風'];
+const NEG_WORDS = ['下落', '悪化', '懸念', '減益', '弱気', '鈍化', 'リスク', '急落', '不安', '高止まり'];
 
-    for (let i = 0; i < days; i += 1) {
-      const shock = (this.rng() - 0.5) * 2.2;
-      const drift = 0.04;
-      const returnPct = drift + shock * 0.38;
-      price = clamp(price * (1 + returnPct / 100), 9000, 30000);
+export function sentimentJa(text) {
+  const scorePos = POS_WORDS.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+  const scoreNeg = NEG_WORDS.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+  const score = (scorePos - scoreNeg) / 5;
+  return Math.max(-1, Math.min(1, score));
+}
 
-      ema12 = ema12 * 0.846 + price * 0.154;
-      ema26 = ema26 * 0.926 + price * 0.074;
-      const macd = (ema12 - ema26) / Math.max(1, price) * 100;
+export function analyzeMarket(rows, news) {
+  const closes = rows.map((r) => r.close);
+  const returns = rows.map((r, i) => (i === 0 ? 0 : ((r.close / rows[i - 1].close) - 1) * 100));
+  const e12 = ema(closes, 12);
+  const e26 = ema(closes, 26);
+  const macd = e12.map((v, i) => v - e26[i]);
+  const rsi14 = rsi(closes, 14);
 
-      const vix = clamp(17 + (this.rng() - 0.5) * 7 - returnPct * 1.5, 11, 48);
-      const rates = clamp(4.5 + (this.rng() - 0.5) * 0.4 + i * 0.0006, 3.6, 6.4);
-      const breadth = clamp(52 + (this.rng() - 0.5) * 26 + returnPct * 6, 8, 92);
-      const volumeTrend = clamp((this.rng() - 0.5) * 2 + Math.abs(returnPct) * 0.6, -2.2, 3.2);
-
-      const lookback = this.records.slice(-14).map((d) => d.returnPct);
-      const gains = lookback.filter((x) => x > 0);
-      const losses = lookback.filter((x) => x < 0).map(Math.abs);
-      const avgGain = gains.length ? mean(gains) : 0.08;
-      const avgLoss = losses.length ? mean(losses) : 0.08;
-      const rs = avgLoss > 0 ? avgGain / avgLoss : 1.1;
-      const rsi = clamp(100 - 100 / (1 + rs), 10, 90);
-
-      this.records.push({
-        day: i + 1,
-        price,
-        returnPct,
-        momentum: lookback.length ? mean(lookback.slice(-5)) : 0,
-        rsi,
-        macd,
-        vix,
-        breadth,
-        rates,
-        volumeTrend,
-        newsSentiment: (this.rng() - 0.5) * 0.8,
-      });
-    }
-
-    this.day = this.records.length;
-  }
-
-  current() {
-    return this.records[this.records.length - 1];
-  }
-
-  featureVector(record) {
+  const withFeatures = rows.map((r, i) => {
+    const recentReturns = returns.slice(Math.max(0, i - 5), i + 1);
+    const vol20 = std(returns.slice(Math.max(0, i - 20), i + 1));
     return {
-      momentum: clamp(record.momentum / 1.6, -2, 2),
-      rsi: (record.rsi - 50) / 25,
-      macd: clamp(record.macd / 1.8, -2, 2),
-      vix: (20 - record.vix) / 10,
-      breadth: (record.breadth - 50) / 20,
-      rates: (4.3 - record.rates) / 1.5,
-      volumeTrend: clamp(record.volumeTrend / 1.2, -2, 2),
-      newsSentiment: clamp(record.newsSentiment / 0.9, -2, 2),
+      ...r,
+      ret: returns[i],
+      momentum5: mean(recentReturns),
+      rsi14: rsi14[i],
+      macd: macd[i],
+      vol20,
     };
-  }
+  });
 
-  score(record = this.current()) {
-    const f = this.featureVector(record);
-    return Object.entries(this.weights).reduce((acc, [k, w]) => acc + w * f[k], 0);
-  }
+  const newsScored = news.map((n) => ({ ...n, sentiment: sentimentJa(n.title) }));
+  const newsSentiment = mean(newsScored.map((n) => n.sentiment));
 
-  predictHorizon(days = 20) {
-    const c = this.current();
-    const score = this.score(c);
-    const dailyAlpha = score * 0.09;
-    const expectedMove = clamp(dailyAlpha * days, -15, 15);
-    const confidence = clamp(45 + Math.abs(score) * 14 - c.vix * 0.35, 30, 92);
-
-    this.lastPrediction = {
-      horizonDays: days,
-      expectedMovePct: expectedMove,
-      expectedPrice: c.price * (1 + expectedMove / 100),
-      confidence,
-      regime: score > 0.5 ? 'Risk-On' : score < -0.5 ? 'Risk-Off' : 'Neutral',
-      score,
-      day: this.day,
-    };
-    return this.lastPrediction;
-  }
-
-  ingestNews(items) {
-    items.forEach((item) => {
-      this.newsFeed.unshift({ ...item, day: this.day + 1 });
-    });
-    this.newsFeed = this.newsFeed.slice(0, 120);
-  }
-
-  generateDailyNews() {
-    const topics = [
-      ['NVIDIA earnings beat', 0.55],
-      ['Fed official hints prolonged tight policy', -0.42],
-      ['AI capex outlook raised by mega caps', 0.38],
-      ['Geopolitical tension pressures semiconductors', -0.35],
-      ['Cloud demand stabilizes', 0.22],
-      ['Labor market cools gradually', 0.18],
-      ['Bond yields spike on inflation surprise', -0.4],
-      ['M&A activity supports tech valuations', 0.25],
-    ];
-
-    const count = 2 + Math.floor(this.rng() * 3);
-    const news = [];
-    for (let i = 0; i < count; i += 1) {
-      const [headline, base] = topics[Math.floor(this.rng() * topics.length)];
-      news.push({
-        headline,
-        sentiment: clamp(base + (this.rng() - 0.5) * 0.4, -1, 1),
-        impact: clamp(0.4 + this.rng() * 0.8, 0.2, 1.5),
-      });
-    }
-    this.ingestNews(news);
-    return news;
-  }
-
-  aggregatedNewsSentiment(lookback = 12) {
-    const slice = this.newsFeed.slice(0, lookback);
-    if (!slice.length) return 0;
-    const weighted = slice.reduce((acc, n) => acc + n.sentiment * n.impact, 0);
-    const totalImpact = slice.reduce((acc, n) => acc + n.impact, 0);
-    return totalImpact ? weighted / totalImpact : 0;
-  }
-
-  learnFromOutcome(actualReturnPct, predictedScore, features) {
-    const target = clamp(actualReturnPct / 1.2, -2, 2);
-    const error = target - predictedScore;
-    Object.keys(this.weights).forEach((k) => {
-      this.weights[k] = clamp(
-        this.weights[k] + this.learningRate * error * features[k],
-        -2.4,
-        2.4,
-      );
-    });
-    this.learningRate = clamp(this.learningRate * 0.9995, 0.005, 0.02);
-    return error;
-  }
-
-  stepDay() {
-    const prev = this.current();
-    const features = this.featureVector(prev);
-    const predScore = this.score(prev);
-
-    const newsSentiment = this.aggregatedNewsSentiment(14) * 0.9 + (this.rng() - 0.5) * 0.2;
-    const exoShock = (this.rng() - 0.5) * 1.4;
-
-    const actualReturnPct = clamp(
-      predScore * 0.25 + newsSentiment * 0.45 + exoShock,
-      -4.8,
-      4.8,
-    );
-
-    const price = clamp(prev.price * (1 + actualReturnPct / 100), 8000, 32000);
-    const macd = clamp(prev.macd * 0.7 + actualReturnPct * 0.25, -4, 4);
-    const vix = clamp(prev.vix + (this.rng() - 0.5) * 2.3 - actualReturnPct * 1.9, 10, 55);
-    const rates = clamp(prev.rates + (this.rng() - 0.5) * 0.08, 3.5, 7);
-    const breadth = clamp(prev.breadth + actualReturnPct * 8 + (this.rng() - 0.5) * 5, 5, 95);
-    const volumeTrend = clamp(Math.abs(actualReturnPct) * 0.7 + (this.rng() - 0.5) * 1.6, -2.5, 4.5);
-    const rsi = clamp(prev.rsi * 0.72 + (actualReturnPct > 0 ? 62 : 40) * 0.28 + (this.rng() - 0.5) * 4, 8, 92);
-
-    const next = {
-      day: prev.day + 1,
-      price,
-      returnPct: actualReturnPct,
-      momentum: prev.momentum * 0.7 + actualReturnPct * 0.3,
-      rsi,
-      macd,
-      vix,
-      breadth,
-      rates,
-      volumeTrend,
+  const dataset = withFeatures.slice(30, -1).map((r, i) => {
+    const next = withFeatures[31 + i];
+    const x = [
+      1,
+      r.momentum5 / 3,
+      (r.rsi14 - 50) / 25,
+      r.macd / 250,
+      r.vol20 / 2,
       newsSentiment,
-    };
+    ];
+    const y = next.ret / 3;
+    return { x, y, date: r.date };
+  });
 
-    this.records.push(next);
-    this.day += 1;
+  const split = Math.max(40, Math.floor(dataset.length * 0.8));
+  const train = dataset.slice(0, split);
+  const test = dataset.slice(split);
 
-    const error = this.learnFromOutcome(actualReturnPct, predScore, features);
-    return { next, error };
+  let w = [0, 0, 0, 0, 0, 0];
+  const lr = 0.03;
+  for (let epoch = 0; epoch < 500; epoch += 1) {
+    for (const row of train) {
+      const pred = w.reduce((s, wi, idx) => s + wi * row.x[idx], 0);
+      const err = row.y - pred;
+      for (let k = 0; k < w.length; k += 1) w[k] += lr * err * row.x[k] * 0.1;
+    }
   }
 
-  backtest(window = 60) {
-    const slice = this.records.slice(-window);
-    const realized = slice.map((d) => d.returnPct);
-    const vol = stdDev(realized) * Math.sqrt(252);
-    const upDays = realized.filter((r) => r > 0).length;
-    const hitRate = upDays / Math.max(1, realized.length);
-    const trend = (slice[slice.length - 1].price / slice[0].price - 1) * 100;
-
-    return {
-      annualizedVolPct: vol,
-      upDayRatio: hitRate,
-      windowTrendPct: trend,
-      avgReturnPct: mean(realized),
-    };
-  }
-
-  modelDiagnostics() {
-    const w = this.weights;
-    const totalAbs = Object.values(w).reduce((a, b) => a + Math.abs(b), 0);
-    return Object.entries(w)
-      .map(([k, v]) => ({ feature: k, weight: v, importance: Math.abs(v) / totalAbs }))
-      .sort((a, b) => b.importance - a.importance);
-  }
-
-  serialize() {
-    return JSON.stringify({
-      day: this.day,
-      records: this.records,
-      newsFeed: this.newsFeed,
-      weights: this.weights,
-      learningRate: this.learningRate,
-      lastPrediction: this.lastPrediction,
+  const evaluate = (arr) => {
+    const errors = arr.map((row) => {
+      const pred = w.reduce((s, wi, idx) => s + wi * row.x[idx], 0);
+      return row.y - pred;
     });
-  }
+    const mae = mean(errors.map((e) => Math.abs(e)));
+    const hit = mean(arr.map((row) => {
+      const pred = w.reduce((s, wi, idx) => s + wi * row.x[idx], 0);
+      return Math.sign(pred) === Math.sign(row.y) ? 1 : 0;
+    }));
+    return { mae, hitRate: hit };
+  };
 
-  static fromSerialized(raw) {
-    const parsed = JSON.parse(raw);
-    const engine = new NasdaqLearningEngine(1);
-    engine.day = parsed.day;
-    engine.records = parsed.records;
-    engine.newsFeed = parsed.newsFeed;
-    engine.weights = parsed.weights;
-    engine.learningRate = parsed.learningRate;
-    engine.lastPrediction = parsed.lastPrediction;
-    engine.rng = createRng(1000 + engine.day);
-    return engine;
-  }
+  const trainScore = evaluate(train);
+  const testScore = evaluate(test);
+
+  const latest = withFeatures[withFeatures.length - 1];
+  const latestX = [
+    1,
+    latest.momentum5 / 3,
+    (latest.rsi14 - 50) / 25,
+    latest.macd / 250,
+    latest.vol20 / 2,
+    newsSentiment,
+  ];
+
+  const nextRet = w.reduce((s, wi, i) => s + wi * latestX[i], 0) * 3;
+  const expected20 = Math.max(-15, Math.min(15, nextRet * 12));
+
+  return {
+    latest,
+    closes,
+    returns,
+    macd,
+    rsi14,
+    news: newsScored,
+    model: {
+      weights: {
+        intercept: w[0],
+        momentum5: w[1],
+        rsi: w[2],
+        macd: w[3],
+        volatility: w[4],
+        newsSentiment: w[5],
+      },
+      trainScore,
+      testScore,
+    },
+    forecast: {
+      nextDayReturnPct: nextRet,
+      nextDayPrice: latest.close * (1 + nextRet / 100),
+      expected20DayMovePct: expected20,
+      expected20DayPrice: latest.close * (1 + expected20 / 100),
+      confidence: Math.max(25, Math.min(95, 100 - testScore.mae * 120 - (1 - testScore.hitRate) * 30)),
+    },
+  };
 }
