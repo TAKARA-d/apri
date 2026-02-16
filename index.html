@@ -3,64 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>APRI ペナントマネージャー</title>
+    <title>NASDAQ100 Intelligence Lab</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
-      <h1>⚾ APRI ペナントマネージャー 2026</h1>
-      <p>キャラ育成 × 編成 × シーズン経営</p>
-    </header>
-
-    <main class="grid">
-      <section class="panel controls">
-        <h2>進行</h2>
-        <div class="buttons">
-          <button id="nextDay">1日進める</button>
-          <button id="nextWeek">1週間進める</button>
-          <button id="autoSeason">シーズン完走</button>
-        </div>
-        <div class="buttons">
-          <button data-train="batting">打撃特訓</button>
-          <button data-train="pitching">投手特訓</button>
-          <button data-train="stamina">体力特訓</button>
-          <button id="restBtn">休養</button>
-        </div>
-        <div class="buttons">
-          <button id="saveBtn">セーブ</button>
-          <button id="loadBtn">ロード</button>
-          <button id="resetBtn">リセット</button>
-        </div>
-        <p id="status"></p>
-      </section>
-
-      <section class="panel">
-        <h2>順位表</h2>
-        <table id="standings"></table>
-      </section>
-
-      <section class="panel wide">
-        <h2>あなたの球団: <span id="teamName"></span></h2>
-        <p id="teamMeta"></p>
-        <div id="roster" class="roster"></div>
-      </section>
-
-      <section class="panel">
-        <h2>今日の試合結果</h2>
-        <ul id="todayResults"></ul>
-      </section>
-
-      <section class="panel">
-        <h2>スカウト候補</h2>
-        <ul id="prospects"></ul>
-      </section>
-
-      <section class="panel wide">
-        <h2>ニュース</h2>
-        <ul id="logs"></ul>
-      </section>
-    </main>
-
+    <div id="root"></div>
     <script type="module" src="app.js"></script>
   </body>
 </html>
