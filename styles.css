@@ -56,4 +56,9 @@ strong { font-size: 1.08rem; }
 @media (max-width: 960px) {
   .grid { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr; }
+  .live-row { grid-template-columns: 1fr; }
 }
+
+.live-row { display:grid; grid-template-columns: repeat(5, minmax(140px,1fr)); gap:10px; }
+.live-row > div { background:#0b1224; border:1px solid #1f2d4e; border-radius:10px; padding:10px; }
+.live { border-color:#2e5ea9; }

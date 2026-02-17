@@ -68,10 +68,9 @@ async function fetchJapaneseNews() {
   const out = [];
   for (const url of NEWS_URLS) {
     try {
-      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.0' } });
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
       if (!r.ok) continue;
-      const xml = await r.text();
-      out.push(...parseRssItems(xml));
+      out.push(...parseRssItems(await r.text()));
     } catch {}
   }
   const uniq = new Map();
@@ -90,19 +89,77 @@ function parseCsv(csv) {
 }
 
 async function fetchFuturesLikeRows() {
-  const urls = [
-    'https://stooq.com/q/d/l/?s=nq.f&i=d',
-    'https://stooq.com/q/d/l/?s=ndx&i=d',
-  ];
-  for (const url of urls) {
+  for (const url of ['https://stooq.com/q/d/l/?s=nq.f&i=d', 'https://stooq.com/q/d/l/?s=ndx&i=d']) {
     try {
-      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.0' } });
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
       if (!r.ok) continue;
       const rows = parseCsv(await r.text());
       if (rows.length) return rows.slice(-320);
     } catch {}
   }
   return [];
+}
+
+async function fetchYahooRealtimeQuote() {
+  const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=NQ=F';
+  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
+  if (!r.ok) throw new Error(`yahoo quote ${r.status}`);
+  const data = await r.json();
+  const q = data?.quoteResponse?.result?.[0];
+  if (!q || !Number.isFinite(q.regularMarketPrice)) throw new Error('yahoo missing');
+  return {
+    symbol: q.symbol || 'NQ=F',
+    name: q.shortName || 'E-mini Nasdaq 100 Futures',
+    price: Number(q.regularMarketPrice),
+    change: Number(q.regularMarketChange || 0),
+    changePercent: Number(q.regularMarketChangePercent || 0),
+    marketTime: q.regularMarketTime ? new Date(q.regularMarketTime * 1000).toISOString() : new Date().toISOString(),
+    source: 'live_yahoo',
+  };
+}
+
+async function fetchStooqRealtimeQuote() {
+  const url = 'https://stooq.com/q/l/?s=nq.f&i=1';
+  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
+  if (!r.ok) throw new Error(`stooq quote ${r.status}`);
+  const text = await r.text();
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) throw new Error('stooq rows missing');
+  const cols = lines[1].split(',').map((x) => x.replaceAll('"', '').trim());
+  const close = Number(cols[6]);
+  const open = Number(cols[3]);
+  if (!Number.isFinite(close)) throw new Error('stooq close missing');
+  const change = Number.isFinite(open) ? close - open : 0;
+  const changePercent = Number.isFinite(open) && open ? (change / open) * 100 : 0;
+  return {
+    symbol: cols[0] || 'NQ.F',
+    name: 'NASDAQ100 Futures (Stooq)',
+    price: close,
+    change,
+    changePercent,
+    marketTime: `${cols[1] || ''}T${cols[2] || '00:00:00'}Z`,
+    source: 'live_stooq',
+  };
+}
+
+async function fetchRealtimeQuote(fallbackRows = []) {
+  try { return await fetchYahooRealtimeQuote(); } catch {}
+  try { return await fetchStooqRealtimeQuote(); } catch {}
+  const last = fallbackRows.at(-1);
+  const prev = fallbackRows.at(-2) || last;
+  if (last) {
+    const change = last.close - prev.close;
+    return {
+      symbol: 'NQ先物(フォールバック)',
+      name: 'NASDAQ100 Futures fallback',
+      price: Number(last.close),
+      change,
+      changePercent: prev.close ? (change / prev.close) * 100 : 0,
+      marketTime: `${last.date}T00:00:00Z`,
+      source: 'fallback',
+    };
+  }
+  return { symbol: 'NQ先物', name: 'NASDAQ100 Futures', price: 0, change: 0, changePercent: 0, marketTime: new Date().toISOString(), source: 'unavailable' };
 }
 
 async function serveStatic(req, res) {
@@ -136,6 +193,12 @@ const server = createServer(async (req, res) => {
       if (live.length) return sendJson(res, 200, { source: 'live', fetchedAt: new Date().toISOString(), news: live });
       const fallback = await readJson('data/news_fallback_ja.json', []);
       return sendJson(res, 200, { source: 'fallback', fetchedAt: new Date().toISOString(), news: fallback });
+    }
+
+    if (req.url.startsWith('/api/quote')) {
+      const fallbackRows = await readJson('data/ndx_fallback.json', []);
+      const quote = await fetchRealtimeQuote(fallbackRows);
+      return sendJson(res, 200, { fetchedAt: new Date().toISOString(), quote });
     }
 
     if (req.url.startsWith('/api/market')) {

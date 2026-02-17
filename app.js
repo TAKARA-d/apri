@@ -10,29 +10,17 @@ function 数値(v, d = 2) {
 
 function 軸付きライン({ data, labels, yLabel }) {
   if (!data.length) return h('div', { className: 'empty' }, 'データなし');
-  const w = 960;
-  const hgt = 260;
-  const pad = { l: 70, r: 20, t: 20, b: 45 };
-  const innerW = w - pad.l - pad.r;
-  const innerH = hgt - pad.t - pad.b;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = Math.max(1e-6, max - min);
-
-  const p = data.map((v, i) => {
-    const x = pad.l + (i / Math.max(1, data.length - 1)) * innerW;
-    const y = pad.t + (1 - (v - min) / range) * innerH;
-    return `${x},${y}`;
-  }).join(' ');
-
+  const w = 960; const hgt = 260; const pad = { l: 70, r: 20, t: 20, b: 45 };
+  const innerW = w - pad.l - pad.r; const innerH = hgt - pad.t - pad.b;
+  const min = Math.min(...data); const max = Math.max(...data); const range = Math.max(1e-6, max - min);
+  const p = data.map((v, i) => `${pad.l + (i / Math.max(1, data.length - 1)) * innerW},${pad.t + (1 - (v - min) / range) * innerH}`).join(' ');
   const yTicks = Array.from({ length: 5 }, (_, i) => min + ((4 - i) / 4) * range);
   const xTicks = [0, Math.floor((data.length - 1) / 2), data.length - 1];
-
   return h('svg', { viewBox: `0 0 ${w} ${hgt}`, className: 'chart' },
     h('rect', { x: 0, y: 0, width: w, height: hgt, fill: '#0a1122' }),
     ...yTicks.map((t, i) => {
       const y = pad.t + (i / 4) * innerH;
-      return h(React.Fragment, { key: `y-${i}` },
+      return h(React.Fragment, { key: i },
         h('line', { x1: pad.l, x2: w - pad.r, y1: y, y2: y, stroke: '#253a62', strokeDasharray: '4 4' }),
         h('text', { x: 6, y: y + 4, fill: '#9fb3d9', fontSize: 11 }, `${Math.round(t).toLocaleString('ja-JP')}`),
       );
@@ -52,64 +40,40 @@ function 軸付きライン({ data, labels, yLabel }) {
   );
 }
 
-function 軸付きバー({ data, labels }) {
-  if (!data.length) return h('div', { className: 'empty' }, 'データなし');
-  const w = 960;
-  const hgt = 260;
-  const pad = { l: 70, r: 20, t: 20, b: 45 };
-  const innerW = w - pad.l - pad.r;
-  const innerH = hgt - pad.t - pad.b;
-  const maxAbs = Math.max(...data.map((v) => Math.abs(v)), 1);
-  const zeroY = pad.t + innerH / 2;
-  const barW = innerW / data.length;
-
-  const xTicks = [0, Math.floor((data.length - 1) / 2), data.length - 1];
-
-  return h('svg', { viewBox: `0 0 ${w} ${hgt}`, className: 'chart' },
-    h('rect', { x: 0, y: 0, width: w, height: hgt, fill: '#0a1122' }),
-    h('line', { x1: pad.l, x2: w - pad.r, y1: zeroY, y2: zeroY, stroke: '#7aa2e3', strokeWidth: 1.4 }),
-    h('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: hgt - pad.b, stroke: '#7aa2e3', strokeWidth: 1.4 }),
-    ...data.map((v, i) => {
-      const bh = Math.abs(v) / maxAbs * (innerH / 2 - 4);
-      const x = pad.l + i * barW + 1;
-      const y = v >= 0 ? zeroY - bh : zeroY;
-      return h('rect', { key: i, x, y, width: Math.max(1, barW - 2), height: bh, fill: v >= 0 ? '#34d399' : '#f87171' });
-    }),
-    ...xTicks.map((idx, i) => {
-      const x = pad.l + (idx / Math.max(1, data.length - 1)) * innerW;
-      return h('text', { key: i, x: x - 24, y: hgt - 14, fill: '#9fb3d9', fontSize: 11 }, labels[idx] || '');
-    }),
-    h('text', { x: 8, y: 14, fill: '#bfdbfe', fontSize: 11 }, 'Y軸: 騰落率(%)'),
-    h('text', { x: w - 120, y: hgt - 8, fill: '#bfdbfe', fontSize: 11 }, 'X軸: 日付'),
-  );
-}
-
 function App() {
   const [market, setMarket] = useState([]);
   const [news, setNews] = useState([]);
   const [memory, setMemory] = useState({ records: [] });
+  const [quote, setQuote] = useState(null);
   const [meta, setMeta] = useState({ symbol: '-', marketSource: '-', newsSource: '-', updated: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const loadCore = async () => {
+    const [m, n, mem] = await Promise.all([
+      fetch('/api/market').then((r) => r.json()),
+      fetch('/api/news').then((r) => r.json()),
+      fetch('/api/memory').then((r) => r.json()),
+    ]);
+    setMarket(m.rows || []);
+    setNews(n.news || []);
+    setMemory(mem || { records: [] });
+    setMeta({ symbol: m.symbol || 'NQ先物', marketSource: m.source || '-', newsSource: n.source || '-', updated: new Date().toLocaleString('ja-JP') });
+  };
+
+  const loadQuote = async () => {
+    try {
+      const q = await fetch('/api/quote').then((r) => r.json());
+      setQuote(q.quote || null);
+    } catch {}
+  };
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      const [m, n, mem] = await Promise.all([
-        fetch('/api/market').then((r) => r.json()),
-        fetch('/api/news').then((r) => r.json()),
-        fetch('/api/memory').then((r) => r.json()),
-      ]);
-      setMarket(m.rows || []);
-      setNews(n.news || []);
-      setMemory(mem || { records: [] });
-      setMeta({
-        symbol: m.symbol || 'NQ先物',
-        marketSource: m.source || '-',
-        newsSource: n.source || '-',
-        updated: new Date().toLocaleString('ja-JP'),
-      });
+      await loadCore();
+      await loadQuote();
     } catch (e) {
       setError(e.message || '取得に失敗しました');
     } finally {
@@ -119,49 +83,56 @@ function App() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 1000 * 60 * 15);
-    return () => clearInterval(t);
+    const t1 = setInterval(loadCore, 1000 * 60 * 15);
+    const t2 = setInterval(loadQuote, 1000 * 10);
+    return () => { clearInterval(t1); clearInterval(t2); };
   }, []);
 
   const result = useMemo(() => (market.length ? analyzeMarket(market, news, memory) : null), [market, news, memory]);
 
   const 最新実績を登録 = async () => {
-    if (!result || result.closes.length < 3) return;
-    const actual = result.returns[result.returns.length - 1];
-    const predicted = result.forecast.nextDayReturnPct;
+    if (!result || !market.length) return;
     await fetch('/api/memory', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ date: market[market.length - 1].date, predicted, actual }),
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ date: market[market.length - 1].date, predicted: result.forecast.nextDayReturnPct, actual: result.returns[result.returns.length - 1] }),
     });
-    await load();
+    await loadCore();
   };
+
+  const 現在値 = quote?.price ?? result?.latest?.close ?? 0;
+  const 変化pt = quote?.change ?? (result && market.length > 1 ? result.latest.close - market[market.length - 2].close : 0);
+  const 変化pct = quote?.changePercent ?? result?.latest?.ret ?? 0;
 
   return h('div', { className: 'page' },
     h('header', { className: 'hero' },
-      h('h1', null, 'NASDAQ100先物 ポイント監視・予測分析アプリ'),
-      h('p', null, '常時ポイント把握 / 日本語ニュース吸収 / 学習履歴の蓄積で精度改善'),
+      h('h1', null, 'NASDAQ100先物 リアルタイム監視・予測分析アプリ'),
+      h('p', null, '10秒ごとに先物クオート更新。市場履歴とニュースは定期更新で分析。'),
       h('div', { className: 'top-actions' },
         h('button', { onClick: load, disabled: loading }, loading ? '更新中...' : '最新データ更新'),
         h('button', { onClick: 最新実績を登録, disabled: !result }, '最新実績を学習データに追加'),
-        h('span', { className: 'refreshed' }, `最終更新: ${meta.updated || '-'} / 市場:${meta.marketSource} / ニュース:${meta.newsSource}`),
+        h('span', { className: 'refreshed' }, `最終更新: ${meta.updated || '-'} / 市場:${meta.marketSource} / ニュース:${meta.newsSource} / クオート:${quote?.source || '-'}`),
       ),
       error ? h('p', { className: 'error' }, error) : null,
     ),
 
     !result ? h('section', { className: 'panel' }, '読み込み中...') : h(React.Fragment, null,
-      h('section', { className: 'grid' },
-        h('article', { className: 'panel' },
-          h('h2', null, '先物ポイント監視'),
-          h('div', { className: 'stats' },
-            h('div', null, h('label', null, '銘柄'), h('strong', null, meta.symbol)),
-            h('div', null, h('label', null, '現在ポイント'), h('strong', null, `${数値(result.latest.close, 2)} pt`)),
-            h('div', null, h('label', null, '前日比(ポイント)'), h('strong', null, `${数値(result.latest.close - market[market.length - 2].close, 2)} pt`)),
-            h('div', null, h('label', null, '前日比(%)'), h('strong', null, `${数値(result.latest.ret, 2)}%`)),
-            h('div', null, h('label', null, 'RSI(14)'), h('strong', null, `${数値(result.latest.rsi14, 2)}`)),
-            h('div', null, h('label', null, '20日ボラ'), h('strong', null, `${数値(result.latest.vol20, 3)}`)),
-          ),
+      h('section', { className: 'panel live' },
+        h('h2', null, 'リアルタイム先物クオート'),
+        h('div', { className: 'live-row' },
+          h('div', null, h('label', null, '銘柄'), h('strong', null, quote?.symbol || meta.symbol)),
+          h('div', null, h('label', null, '現在ポイント'), h('strong', null, `${数値(現在値, 2)} pt`)),
+          h('div', null, h('label', null, '前日比(ポイント)'), h('strong', null, `${数値(変化pt, 2)} pt`)),
+          h('div', null, h('label', null, '前日比(%)'), h('strong', null, `${数値(変化pct, 2)}%`)),
+          h('div', null, h('label', null, '時刻'), h('strong', null, quote?.marketTime ? new Date(quote.marketTime).toLocaleString('ja-JP') : '-')),
         ),
+      ),
+
+      h('section', { className: 'panel' },
+        h('h2', null, '先物ポイント推移チャート（Y軸: ポイント / X軸: 日付）'),
+        h(軸付きライン, { data: result.closes.slice(-180), labels: market.slice(-180).map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
+      ),
+
+      h('section', { className: 'grid' },
         h('article', { className: 'panel' },
           h('h2', null, '予測と精度'),
           h('div', { className: 'stats' },
@@ -173,33 +144,10 @@ function App() {
             h('div', null, h('label', null, '蓄積学習件数'), h('strong', null, `${result.model.memory.count} 件`)),
           ),
         ),
-      ),
-
-      h('section', { className: 'panel' },
-        h('h2', null, '先物ポイント推移チャート（Y軸: ポイント / X軸: 日付）'),
-        h(軸付きライン, { data: result.closes.slice(-180), labels: market.slice(-180).map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
-      ),
-
-      h('section', { className: 'panel' },
-        h('h2', null, '日次騰落率チャート（Y軸: % / X軸: 日付）'),
-        h(軸付きバー, { data: result.returns.slice(-120), labels: market.slice(-120).map((r) => r.date.slice(5)) }),
-      ),
-
-      h('section', { className: 'grid' },
         h('article', { className: 'panel' },
-          h('h2', null, 'モデル係数（日本語）'),
-          h('table', { className: 'tbl' },
-            h('thead', null, h('tr', null, h('th', null, '特徴量'), h('th', null, '重み'))),
-            h('tbody', null,
-              ...Object.entries(result.model.weights).map(([k, v]) => h('tr', { key: k }, h('td', null, k), h('td', null, 数値(v, 4)))),
-            ),
-          ),
-          h('p', { className: 'muted' }, `検証: Test MAE ${数値(result.model.testScore.mae, 4)} / 方向一致率 ${数値(result.model.testScore.hitRate * 100, 1)}% / 補正バイアス ${数値(result.forecast.calibrationBias, 4)}`),
-        ),
-        h('article', { className: 'panel' },
-          h('h2', null, '日本語ニュース（できる限り直近）'),
+          h('h2', null, '日本語ニュース（直近）'),
           h('ul', { className: 'news' },
-            ...result.scoredNews.slice(0, 15).map((n, i) => h('li', { key: `${n.link}-${i}` },
+            ...result.scoredNews.slice(0, 12).map((n, i) => h('li', { key: `${n.link}-${i}` },
               h('a', { href: n.link, target: '_blank', rel: 'noreferrer' }, n.title),
               h('span', { className: `tone ${n.sentiment >= 0 ? 'pos' : 'neg'}` }, `感情: ${数値(n.sentiment, 2)}`),
               h('small', null, n.pubDate || ''),
