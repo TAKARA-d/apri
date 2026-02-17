@@ -68,7 +68,7 @@ async function fetchJapaneseNews() {
   const out = [];
   for (const url of NEWS_URLS) {
     try {
-      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.4' } });
       if (!r.ok) continue;
       out.push(...parseRssItems(await r.text()));
     } catch {}
@@ -91,7 +91,7 @@ function parseCsv(csv) {
 async function fetchFuturesLikeRows() {
   for (const url of ['https://stooq.com/q/d/l/?s=nq.f&i=d', 'https://stooq.com/q/d/l/?s=ndx&i=d']) {
     try {
-      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.4' } });
       if (!r.ok) continue;
       const rows = parseCsv(await r.text());
       if (rows.length) return rows.slice(-320);
@@ -106,7 +106,7 @@ async function fetchGoogleFinanceRealtimeQuote() {
   const url = 'https://www.google.com/finance/quote/NQW00:CME_EMINIS?hl=ja';
   const r = await fetch(url, {
     headers: {
-      'user-agent': 'Mozilla/5.0 NasdaqApp/2.3',
+      'user-agent': 'Mozilla/5.0 NasdaqApp/2.4',
       'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
     },
   });
@@ -135,27 +135,9 @@ async function fetchGoogleFinanceRealtimeQuote() {
     source: 'live_google_finance',
   };
 }
-async function fetchYahooRealtimeQuote() {
-  const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=NQ=F';
-  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
-  if (!r.ok) throw new Error(`yahoo quote ${r.status}`);
-  const data = await r.json();
-  const q = data?.quoteResponse?.result?.[0];
-  if (!q || !Number.isFinite(q.regularMarketPrice)) throw new Error('yahoo missing');
-  return {
-    symbol: q.symbol || 'NQ=F',
-    name: q.shortName || 'E-mini Nasdaq 100 Futures',
-    price: Number(q.regularMarketPrice),
-    change: Number(q.regularMarketChange || 0),
-    changePercent: Number(q.regularMarketChangePercent || 0),
-    marketTime: q.regularMarketTime ? new Date(q.regularMarketTime * 1000).toISOString() : new Date().toISOString(),
-    source: 'live_yahoo',
-  };
-}
-
 async function fetchStooqRealtimeQuote() {
   const url = 'https://stooq.com/q/l/?s=nq.f&i=1';
-  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
+  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.4' } });
   if (!r.ok) throw new Error(`stooq quote ${r.status}`);
   const text = await r.text();
   const lines = text.trim().split(/\r?\n/);
@@ -179,14 +161,13 @@ async function fetchStooqRealtimeQuote() {
 
 async function fetchRealtimeQuote(fallbackRows = []) {
   try { return await fetchGoogleFinanceRealtimeQuote(); } catch {}
-  try { return await fetchYahooRealtimeQuote(); } catch {}
   try { return await fetchStooqRealtimeQuote(); } catch {}
   const last = fallbackRows.at(-1);
   const prev = fallbackRows.at(-2) || last;
   if (last) {
     const change = last.close - prev.close;
     return {
-      symbol: 'NQ先物(フォールバック)',
+      symbol: 'NQW00連動(フォールバック)',
       name: 'NASDAQ100 Futures fallback',
       price: Number(last.close),
       change,
@@ -239,9 +220,9 @@ const server = createServer(async (req, res) => {
 
     if (req.url.startsWith('/api/market')) {
       const liveRows = await fetchFuturesLikeRows();
-      if (liveRows.length) return sendJson(res, 200, { source: 'live', symbol: 'NQ先物(近似)', rows: liveRows });
+      if (liveRows.length) return sendJson(res, 200, { source: 'live', symbol: 'NQW00連動(近似)', rows: liveRows });
       const fallback = await readJson('data/ndx_fallback.json', []);
-      return sendJson(res, 200, { source: 'fallback', symbol: 'NQ先物(フォールバック)', rows: fallback });
+      return sendJson(res, 200, { source: 'fallback', symbol: 'NQW00連動(フォールバック)', rows: fallback });
     }
 
     if (req.method === 'GET' && req.url.startsWith('/api/memory')) {

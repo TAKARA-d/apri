@@ -58,7 +58,7 @@ function App() {
     setMarket(m.rows || []);
     setNews(n.news || []);
     setMemory(mem || { records: [] });
-    setMeta({ symbol: m.symbol || 'NQ先物', marketSource: m.source || '-', newsSource: n.source || '-', updated: new Date().toLocaleString('ja-JP') });
+    setMeta({ symbol: m.symbol || 'NQW00先物', marketSource: m.source || '-', newsSource: n.source || '-', updated: new Date().toLocaleString('ja-JP') });
   };
 
   const loadQuote = async () => {
