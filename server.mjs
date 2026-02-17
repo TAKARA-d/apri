@@ -100,6 +100,41 @@ async function fetchFuturesLikeRows() {
   return [];
 }
 
+
+
+async function fetchGoogleFinanceRealtimeQuote() {
+  const url = 'https://www.google.com/finance/quote/NQW00:CME_EMINIS?hl=ja';
+  const r = await fetch(url, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 NasdaqApp/2.3',
+      'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
+    },
+  });
+  if (!r.ok) throw new Error(`google finance ${r.status}`);
+  const html = await r.text();
+
+  const priceMatch = html.match(/class="YMlKec fxKbKc">\s*([\$¥€£]?[-+]?\d[\d,]*(?:\.\d+)?)\s*</i)
+    || html.match(/"price"\s*:\s*"?([0-9][0-9,]*(?:\.\d+)?)"?/i);
+  if (!priceMatch) throw new Error('google price missing');
+
+  const normalizeNum = (raw) => Number(String(raw).replace(/[^0-9.+-]/g, ''));
+  const price = normalizeNum(priceMatch[1]);
+  if (!Number.isFinite(price)) throw new Error('google price invalid');
+
+  const changeMatch = html.match(/class="P2Luy[^"]*">\s*([+-]?[\$¥€£]?\d[\d,]*(?:\.\d+)?)\s*</i);
+  const changePctMatch = html.match(/class="JwB6zf[^"]*">\s*([+-]?\d[\d,]*(?:\.\d+)?)%\s*</i);
+  const marketTimeMatch = html.match(/(\d{1,2}:\d{2}:\d{2})\s*UTC/i);
+
+  return {
+    symbol: 'NQW00:CME_EMINIS',
+    name: 'E-mini NASDAQ 100 継続契約 (Google Finance)',
+    price,
+    change: changeMatch ? normalizeNum(changeMatch[1]) : 0,
+    changePercent: changePctMatch ? normalizeNum(changePctMatch[1]) : 0,
+    marketTime: marketTimeMatch ? `${marketTimeMatch[1]} UTC` : new Date().toISOString(),
+    source: 'live_google_finance',
+  };
+}
 async function fetchYahooRealtimeQuote() {
   const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=NQ=F';
   const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.2' } });
@@ -143,6 +178,7 @@ async function fetchStooqRealtimeQuote() {
 }
 
 async function fetchRealtimeQuote(fallbackRows = []) {
+  try { return await fetchGoogleFinanceRealtimeQuote(); } catch {}
   try { return await fetchYahooRealtimeQuote(); } catch {}
   try { return await fetchStooqRealtimeQuote(); } catch {}
   const last = fallbackRows.at(-1);
