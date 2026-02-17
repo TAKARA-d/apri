@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,99 +14,95 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
 };
 
-const JP_NEWS_SOURCES = [
+const NEWS_URLS = [
+  'https://news.google.com/rss/search?q=NASDAQ100+%E5%85%88%E7%89%A9+when:7d&hl=ja&gl=JP&ceid=JP:ja',
+  'https://news.google.com/rss/search?q=%E7%B1%B3%E5%9B%BD%E6%A0%AA+FOMC+when:7d&hl=ja&gl=JP&ceid=JP:ja',
   'https://www3.nhk.or.jp/rss/news/cat5.xml',
-  'https://www3.nhk.or.jp/rss/news/cat6.xml',
-  'https://news.google.com/rss/search?q=NASDAQ100+OR+%E7%B1%B3%E5%9B%BD%E6%A0%AA+OR+%E3%83%8A%E3%82%B9%E3%83%80%E3%83%83%E3%82%AF&hl=ja&gl=JP&ceid=JP:ja',
 ];
+
+const MEMORY_PATH = 'data/model_memory.json';
 
 function sendJson(res, code, body) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
 }
 
-async function readJson(path) {
-  const raw = await readFile(join(ROOT, path), 'utf-8');
-  return JSON.parse(raw);
+async function readJson(path, fallback = null) {
+  try {
+    const raw = await readFile(join(ROOT, path), 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeJson(path, value) {
+  await writeFile(join(ROOT, path), JSON.stringify(value, null, 2), 'utf-8');
 }
 
 function parseRssItems(xml) {
   const items = [];
-
-  const extract = (block, tag) => {
-    const m = block.match(new RegExp(`<${tag}(?: [^>]*)?>([\s\S]*?)<\/${tag}>`, 'i'));
+  const pick = (block, tag) => {
+    const m = block.match(new RegExp(`<${tag}(?: [^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i'));
     return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
   };
 
-  const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1]);
-  for (const b of itemBlocks) {
-    const title = extract(b, 'title');
-    const link = extract(b, 'link');
-    const pubDate = extract(b, 'pubDate') || extract(b, 'dc:date');
+  for (const b of [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => m[1])) {
+    const title = pick(b, 'title');
+    const link = pick(b, 'link');
+    const pubDate = pick(b, 'pubDate') || pick(b, 'dc:date');
     if (title) items.push({ title, link, pubDate });
   }
 
-  const entryBlocks = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].map((m) => m[1]);
-  for (const b of entryBlocks) {
-    const title = extract(b, 'title');
-    let link = '';
-    const attr = b.match(/<link[^>]*href="([^"]+)"[^>]*>/i);
-    if (attr) link = attr[1];
-    const pubDate = extract(b, 'updated') || extract(b, 'published');
+  for (const b of [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].map((m) => m[1])) {
+    const title = pick(b, 'title');
+    const linkMatch = b.match(/<link[^>]*href="([^"]+)"[^>]*>/i);
+    const link = linkMatch ? linkMatch[1] : '';
+    const pubDate = pick(b, 'updated') || pick(b, 'published');
     if (title) items.push({ title, link, pubDate });
   }
-
   return items;
 }
 
 async function fetchJapaneseNews() {
-  const collected = [];
-  for (const url of JP_NEWS_SOURCES) {
+  const out = [];
+  for (const url of NEWS_URLS) {
     try {
-      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqLab/1.0' } });
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.0' } });
       if (!r.ok) continue;
       const xml = await r.text();
-      const items = parseRssItems(xml).map((x) => ({ ...x, source: url }));
-      collected.push(...items);
-    } catch {
-      // ignore source failure and continue with others
-    }
+      out.push(...parseRssItems(xml));
+    } catch {}
   }
-
   const uniq = new Map();
-  for (const n of collected) {
+  for (const n of out) {
     const key = `${n.title}::${n.link}`;
     if (!uniq.has(key)) uniq.set(key, n);
   }
-
-  return [...uniq.values()]
-    .sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0))
-    .slice(0, 40);
+  return [...uniq.values()].sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0)).slice(0, 40);
 }
 
 function parseCsv(csv) {
-  const lines = csv.trim().split(/\r?\n/);
-  const rows = lines.slice(1).map((line) => {
+  return csv.trim().split(/\r?\n/).slice(1).map((line) => {
     const [date, open, high, low, close, volume] = line.split(',');
-    return {
-      date,
-      open: Number(open),
-      high: Number(high),
-      low: Number(low),
-      close: Number(close),
-      volume: Number(volume),
-    };
+    return { date, open: Number(open), high: Number(high), low: Number(low), close: Number(close), volume: Number(volume) };
   }).filter((r) => Number.isFinite(r.close));
-  return rows;
 }
 
-async function fetchNasdaq100History() {
-  const url = 'https://stooq.com/q/d/l/?s=ndx&i=d';
-  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqLab/1.0' } });
-  if (!r.ok) throw new Error(`market fetch failed: ${r.status}`);
-  const csv = await r.text();
-  const rows = parseCsv(csv);
-  return rows.slice(-320);
+async function fetchFuturesLikeRows() {
+  const urls = [
+    'https://stooq.com/q/d/l/?s=nq.f&i=d',
+    'https://stooq.com/q/d/l/?s=ndx&i=d',
+  ];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 NasdaqApp/2.0' } });
+      if (!r.ok) continue;
+      const rows = parseCsv(await r.text());
+      if (rows.length) return rows.slice(-320);
+    } catch {}
+  }
+  return [];
 }
 
 async function serveStatic(req, res) {
@@ -124,28 +120,53 @@ async function serveStatic(req, res) {
   }
 }
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let b = '';
+    req.on('data', (c) => { b += c; });
+    req.on('end', () => resolve(b));
+    req.on('error', reject);
+  });
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.url.startsWith('/api/news')) {
-      try {
-        const news = await fetchJapaneseNews();
-        if (news.length) {
-          return sendJson(res, 200, { fetchedAt: new Date().toISOString(), source: 'live', news });
-        }
-      } catch {}
-      const fallback = await readJson('data/news_fallback_ja.json');
-      return sendJson(res, 200, { fetchedAt: new Date().toISOString(), source: 'fallback', news: fallback });
+      const live = await fetchJapaneseNews();
+      if (live.length) return sendJson(res, 200, { source: 'live', fetchedAt: new Date().toISOString(), news: live });
+      const fallback = await readJson('data/news_fallback_ja.json', []);
+      return sendJson(res, 200, { source: 'fallback', fetchedAt: new Date().toISOString(), news: fallback });
     }
+
     if (req.url.startsWith('/api/market')) {
-      try {
-        const rows = await fetchNasdaq100History();
-        if (rows.length) {
-          return sendJson(res, 200, { fetchedAt: new Date().toISOString(), source: 'live', rows });
-        }
-      } catch {}
-      const fallback = await readJson('data/ndx_fallback.json');
-      return sendJson(res, 200, { fetchedAt: new Date().toISOString(), source: 'fallback', rows: fallback });
+      const liveRows = await fetchFuturesLikeRows();
+      if (liveRows.length) return sendJson(res, 200, { source: 'live', symbol: 'NQ先物(近似)', rows: liveRows });
+      const fallback = await readJson('data/ndx_fallback.json', []);
+      return sendJson(res, 200, { source: 'fallback', symbol: 'NQ先物(フォールバック)', rows: fallback });
     }
+
+    if (req.method === 'GET' && req.url.startsWith('/api/memory')) {
+      const memory = await readJson(MEMORY_PATH, { records: [] });
+      return sendJson(res, 200, memory);
+    }
+
+    if (req.method === 'POST' && req.url.startsWith('/api/memory')) {
+      const body = JSON.parse(await readBody(req) || '{}');
+      const memory = await readJson(MEMORY_PATH, { records: [] });
+      const rec = {
+        date: body.date || new Date().toISOString().slice(0, 10),
+        predicted: Number(body.predicted || 0),
+        actual: Number(body.actual || 0),
+        createdAt: new Date().toISOString(),
+      };
+      if (Number.isFinite(rec.predicted) && Number.isFinite(rec.actual)) {
+        memory.records.push(rec);
+        memory.records = memory.records.slice(-1000);
+        await writeJson(MEMORY_PATH, memory);
+      }
+      return sendJson(res, 200, { ok: true, count: memory.records.length });
+    }
+
     return serveStatic(req, res);
   } catch (err) {
     return sendJson(res, 500, { error: err.message || 'internal error' });

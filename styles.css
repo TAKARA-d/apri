@@ -12,11 +12,11 @@ body {
   font-family: 'Inter', 'Hiragino Sans', system-ui, sans-serif;
   background: radial-gradient(circle at 10% 0%, #1e3a8a 0%, var(--bg) 35%);
 }
-.page { max-width: 1280px; margin: 0 auto; padding: 20px 16px 32px; }
+.page { max-width: 1340px; margin: 0 auto; padding: 20px 16px 32px; }
 .hero h1 { margin: 0; font-size: 2rem; }
 .hero p { color: var(--muted); margin: 8px 0 12px; }
 .top-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.refreshed { color: #bfdbfe; font-size: 0.92rem; }
+.refreshed { color: #bfdbfe; font-size: 0.9rem; }
 .error { color: #fca5a5; }
 .panel {
   background: rgba(15, 23, 42, 0.92);
@@ -30,45 +30,23 @@ body {
 button {
   border: 1px solid #3b82f6;
   background: linear-gradient(180deg, #1d4ed8, #1e40af);
-  color: white;
+  color: #fff;
   border-radius: 10px;
   padding: 9px 14px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
 }
-button:disabled { opacity: 0.7; cursor: wait; }
-.stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
-  gap: 10px;
-}
-.stats div {
-  background: #0b1224;
-  border: 1px solid #1f2d4e;
-  border-radius: 10px;
-  padding: 10px;
-}
-label { display: block; color: var(--muted); font-size: 0.85rem; margin-bottom: 4px; }
+button:disabled { opacity: 0.65; cursor: wait; }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap: 10px; }
+.stats div { background: #0b1224; border: 1px solid #1f2d4e; border-radius: 10px; padding: 10px; }
+label { display: block; color: var(--muted); font-size: 0.84rem; margin-bottom: 4px; }
 strong { font-size: 1.08rem; }
-.chart {
-  width: 100%;
-  height: 200px;
-  display: block;
-  background: #0a1022;
-  border: 1px solid #1d2b4a;
-  border-radius: 10px;
-}
+.chart { width: 100%; height: 280px; display: block; border-radius: 10px; border: 1px solid #1d2b4a; }
 .tbl { width: 100%; border-collapse: collapse; }
 .tbl th, .tbl td { padding: 8px; border-bottom: 1px solid #203357; text-align: left; }
-.muted { color: var(--muted); font-size: 0.92rem; }
+.muted { color: var(--muted); font-size: 0.9rem; }
 .news { list-style: none; padding: 0; margin: 0; }
-.news li {
-  display: grid;
-  grid-template-columns: 1fr 100px;
-  gap: 8px;
-  border-bottom: 1px solid #203357;
-  padding: 8px 0;
-}
+.news li { display: grid; grid-template-columns: 1fr 110px; gap: 8px; border-bottom: 1px solid #203357; padding: 8px 0; }
 .news a { color: #dbeafe; text-decoration: none; }
 .news a:hover { text-decoration: underline; }
 .news small { grid-column: 1 / -1; color: #94a3b8; }
