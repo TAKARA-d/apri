@@ -1,3 +1,7 @@
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
 function 平均(values) {
   if (!values.length) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -41,14 +45,24 @@ export function 日本語センチメント(text) {
 }
 
 function モデル補正(memory = { records: [] }) {
-  const records = memory.records || [];
+  const records = (memory.records || []).slice(-120);
   if (!records.length) return { bias: 0, hitRate: 0, mae: 0, count: 0 };
-  const errors = records.map((r) => r.actual - r.predicted);
-  const hits = records.map((r) => (Math.sign(r.actual) === Math.sign(r.predicted) ? 1 : 0));
+
+  // 直近データほど重みを大きくする（指数重み）
+  const weighted = records.map((r, i) => {
+    const w = Math.exp((i - (records.length - 1)) / 20);
+    return { ...r, w };
+  });
+
+  const wSum = weighted.reduce((s, r) => s + r.w, 0) || 1;
+  const bias = weighted.reduce((s, r) => s + (r.actual - r.predicted) * r.w, 0) / wSum;
+  const hitRate = weighted.reduce((s, r) => s + (Math.sign(r.actual) === Math.sign(r.predicted) ? 1 : 0) * r.w, 0) / wSum;
+  const mae = weighted.reduce((s, r) => s + Math.abs(r.actual - r.predicted) * r.w, 0) / wSum;
+
   return {
-    bias: 平均(errors),
-    hitRate: 平均(hits),
-    mae: 平均(errors.map((e) => Math.abs(e))),
+    bias: clamp(bias, -1.5, 1.5),
+    hitRate,
+    mae,
     count: records.length,
   };
 }

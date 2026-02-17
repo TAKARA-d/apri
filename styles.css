@@ -64,3 +64,7 @@ strong { font-size: 1.08rem; }
 .live { border-color:#2e5ea9; }
 
 .hint { color: #9fb3d9; font-size: 0.88rem; margin: 8px 0 0; }
+
+.range-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.tab-btn { padding:6px 10px; font-size:0.85rem; border-radius:8px; }
+.tab-btn.active { background:linear-gradient(180deg,#2563eb,#1d4ed8); border-color:#60a5fa; }

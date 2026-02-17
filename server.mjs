@@ -246,12 +246,19 @@ const server = createServer(async (req, res) => {
         actual: Number(body.actual || 0),
         createdAt: new Date().toISOString(),
       };
+      let updated = false;
       if (Number.isFinite(rec.predicted) && Number.isFinite(rec.actual)) {
-        memory.records.push(rec);
+        const idx = (memory.records || []).findIndex((x) => x.date === rec.date);
+        if (idx >= 0) {
+          memory.records[idx] = rec;
+          updated = true;
+        } else {
+          memory.records.push(rec);
+        }
         memory.records = memory.records.slice(-1000);
         await writeJson(MEMORY_PATH, memory);
       }
-      return sendJson(res, 200, { ok: true, count: memory.records.length });
+      return sendJson(res, 200, { ok: true, count: memory.records.length, updated });
     }
 
     return serveStatic(req, res);

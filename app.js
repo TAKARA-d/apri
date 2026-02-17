@@ -55,6 +55,7 @@ function App() {
   const [meta, setMeta] = useState({ symbol: '-', marketSource: '-', newsSource: '-', updated: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [chartRange, setChartRange] = useState('6m');
 
   const loadCore = async () => {
     const [m, n, mem] = await Promise.all([
@@ -120,6 +121,13 @@ function App() {
   const 変化pct = quote?.changePercent ?? result?.latest?.ret ?? 0;
   const 履歴終値 = market.length ? market[market.length - 1].close : null;
   const 乖離 = 履歴終値 != null ? Number(現在値) - Number(履歴終値) : 0;
+  const 最新日付 = 解析用市場.length ? 解析用市場[解析用市場.length - 1].date : null;
+  const 保存済み = 最新日付 ? (memory.records || []).some((r) => r.date === 最新日付) : false;
+
+  const rangeLengthMap = { '5d': 5, '1m': 22, '3m': 66, '6m': 132, '1y': 252 };
+  const rangeLen = rangeLengthMap[chartRange] || 132;
+  const chartRows = 解析用市場.slice(-rangeLen);
+  const chartCloses = result ? result.closes.slice(-rangeLen) : [];
 
   return h('div', { className: 'page' },
     h('header', { className: 'hero' },
@@ -127,7 +135,7 @@ function App() {
       h('p', null, 'リアルタイム値(10秒更新)を分析系にも反映し、チャート・予測とのズレを最小化しています。'),
       h('div', { className: 'top-actions' },
         h('button', { onClick: load, disabled: loading }, loading ? '更新中...' : '最新データ更新'),
-        h('button', { onClick: 最新実績を登録, disabled: !result, title: '予測値と実績値を蓄積し、次回予測の補正に使います' }, '予測検証データを保存'),
+        h('button', { onClick: 最新実績を登録, disabled: !result || 保存済み, title: '予測値と実績値を蓄積し、次回予測の補正に使います（同日データは上書き）' }, 保存済み ? '本日は保存済み' : '予測検証データを保存'),
         h('span', { className: 'refreshed' }, `最終更新: ${meta.updated || '-'} / 市場:${meta.marketSource} / ニュース:${meta.newsSource} / クオート:${quote?.source || '-'}`),
       ),
       h('p', { className: 'hint' }, '※ 学習ボタンは「予測が当たったか」を保存して、将来の予測補正（バイアス補正）に使うためのものです。'),
@@ -149,7 +157,20 @@ function App() {
 
       h('section', { className: 'panel' },
         h('h2', null, '先物ポイント推移チャート（Y軸: ポイント / X軸: 日付）'),
-        h(軸付きライン, { data: result.closes.slice(-180), labels: 解析用市場.slice(-180).map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
+        h('div', { className: 'range-tabs' },
+          ...[
+            ['5d', '5日'],
+            ['1m', '1か月'],
+            ['3m', '3か月'],
+            ['6m', '6か月'],
+            ['1y', '1年'],
+          ].map(([k, label]) => h('button', {
+            key: k,
+            className: `tab-btn ${chartRange === k ? 'active' : ''}`,
+            onClick: () => setChartRange(k),
+          }, label)),
+        ),
+        h(軸付きライン, { data: chartCloses, labels: chartRows.map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
       ),
 
       h('section', { className: 'grid' },
