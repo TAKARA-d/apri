@@ -62,3 +62,5 @@ strong { font-size: 1.08rem; }
 .live-row { display:grid; grid-template-columns: repeat(5, minmax(140px,1fr)); gap:10px; }
 .live-row > div { background:#0b1224; border:1px solid #1f2d4e; border-radius:10px; padding:10px; }
 .live { border-color:#2e5ea9; }
+
+.hint { color: #9fb3d9; font-size: 0.88rem; margin: 8px 0 0; }

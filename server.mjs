@@ -124,6 +124,13 @@ async function fetchGoogleFinanceRealtimeQuote() {
   const changeMatch = html.match(/class="P2Luy[^"]*">\s*([+-]?[\$¥€£]?\d[\d,]*(?:\.\d+)?)\s*</i);
   const changePctMatch = html.match(/class="JwB6zf[^"]*">\s*([+-]?\d[\d,]*(?:\.\d+)?)%\s*</i);
   const marketTimeMatch = html.match(/(\d{1,2}:\d{2}:\d{2})\s*UTC/i);
+  let marketTimeIso = new Date().toISOString();
+  if (marketTimeMatch) {
+    const now = new Date();
+    const [hh, mm, ss] = marketTimeMatch[1].split(':').map(Number);
+    const dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hh, mm, ss));
+    marketTimeIso = dt.toISOString();
+  }
 
   return {
     symbol: 'NQW00:CME_EMINIS',
@@ -131,7 +138,7 @@ async function fetchGoogleFinanceRealtimeQuote() {
     price,
     change: changeMatch ? normalizeNum(changeMatch[1]) : 0,
     changePercent: changePctMatch ? normalizeNum(changePctMatch[1]) : 0,
-    marketTime: marketTimeMatch ? `${marketTimeMatch[1]} UTC` : new Date().toISOString(),
+    marketTime: marketTimeIso,
     source: 'live_google_finance',
   };
 }

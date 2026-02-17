@@ -8,6 +8,13 @@ function 数値(v, d = 2) {
   return Number(v).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 
+function クオート時刻表示(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) return d.toLocaleString('ja-JP');
+  return String(value);
+}
+
 function 軸付きライン({ data, labels, yLabel }) {
   if (!data.length) return h('div', { className: 'empty' }, 'データなし');
   const w = 960; const hgt = 260; const pad = { l: 70, r: 20, t: 20, b: 45 };
@@ -69,16 +76,10 @@ function App() {
   };
 
   const load = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      await loadCore();
-      await loadQuote();
-    } catch (e) {
-      setError(e.message || '取得に失敗しました');
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError('');
+    try { await loadCore(); await loadQuote(); }
+    catch (e) { setError(e.message || '取得に失敗しました'); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -88,30 +89,48 @@ function App() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, []);
 
-  const result = useMemo(() => (market.length ? analyzeMarket(market, news, memory) : null), [market, news, memory]);
+  const 解析用市場 = useMemo(() => {
+    if (!market.length) return [];
+    if (!quote?.price || !Number.isFinite(Number(quote.price))) return market;
+    const copy = market.map((x) => ({ ...x }));
+    const lastIdx = copy.length - 1;
+    copy[lastIdx].close = Number(quote.price);
+    copy[lastIdx].high = Math.max(copy[lastIdx].high, Number(quote.price));
+    copy[lastIdx].low = Math.min(copy[lastIdx].low, Number(quote.price));
+    return copy;
+  }, [market, quote]);
+
+  const result = useMemo(() => (解析用市場.length ? analyzeMarket(解析用市場, news, memory) : null), [解析用市場, news, memory]);
 
   const 最新実績を登録 = async () => {
-    if (!result || !market.length) return;
+    if (!result || !解析用市場.length) return;
     await fetch('/api/memory', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ date: market[market.length - 1].date, predicted: result.forecast.nextDayReturnPct, actual: result.returns[result.returns.length - 1] }),
+      body: JSON.stringify({
+        date: 解析用市場[解析用市場.length - 1].date,
+        predicted: result.forecast.nextDayReturnPct,
+        actual: result.returns[result.returns.length - 1],
+      }),
     });
     await loadCore();
   };
 
   const 現在値 = quote?.price ?? result?.latest?.close ?? 0;
-  const 変化pt = quote?.change ?? (result && market.length > 1 ? result.latest.close - market[market.length - 2].close : 0);
+  const 変化pt = quote?.change ?? (result && 解析用市場.length > 1 ? result.latest.close - 解析用市場[解析用市場.length - 2].close : 0);
   const 変化pct = quote?.changePercent ?? result?.latest?.ret ?? 0;
+  const 履歴終値 = market.length ? market[market.length - 1].close : null;
+  const 乖離 = 履歴終値 != null ? Number(現在値) - Number(履歴終値) : 0;
 
   return h('div', { className: 'page' },
     h('header', { className: 'hero' },
       h('h1', null, 'NASDAQ100先物 リアルタイム監視・予測分析アプリ'),
-      h('p', null, '10秒ごとに先物クオート更新。市場履歴とニュースは定期更新で分析。'),
+      h('p', null, 'リアルタイム値(10秒更新)を分析系にも反映し、チャート・予測とのズレを最小化しています。'),
       h('div', { className: 'top-actions' },
         h('button', { onClick: load, disabled: loading }, loading ? '更新中...' : '最新データ更新'),
-        h('button', { onClick: 最新実績を登録, disabled: !result }, '最新実績を学習データに追加'),
+        h('button', { onClick: 最新実績を登録, disabled: !result, title: '予測値と実績値を蓄積し、次回予測の補正に使います' }, '予測検証データを保存'),
         h('span', { className: 'refreshed' }, `最終更新: ${meta.updated || '-'} / 市場:${meta.marketSource} / ニュース:${meta.newsSource} / クオート:${quote?.source || '-'}`),
       ),
+      h('p', { className: 'hint' }, '※ 学習ボタンは「予測が当たったか」を保存して、将来の予測補正（バイアス補正）に使うためのものです。'),
       error ? h('p', { className: 'error' }, error) : null,
     ),
 
@@ -123,18 +142,19 @@ function App() {
           h('div', null, h('label', null, '現在ポイント'), h('strong', null, `${数値(現在値, 2)} pt`)),
           h('div', null, h('label', null, '前日比(ポイント)'), h('strong', null, `${数値(変化pt, 2)} pt`)),
           h('div', null, h('label', null, '前日比(%)'), h('strong', null, `${数値(変化pct, 2)}%`)),
-          h('div', null, h('label', null, '時刻'), h('strong', null, quote?.marketTime ? new Date(quote.marketTime).toLocaleString('ja-JP') : '-')),
+          h('div', null, h('label', null, '時刻'), h('strong', null, クオート時刻表示(quote?.marketTime))),
         ),
+        h('p', { className: 'hint' }, `履歴終値との差: ${数値(乖離, 2)} pt（分析値はこのリアルタイム値を最終足へ反映済み）`),
       ),
 
       h('section', { className: 'panel' },
         h('h2', null, '先物ポイント推移チャート（Y軸: ポイント / X軸: 日付）'),
-        h(軸付きライン, { data: result.closes.slice(-180), labels: market.slice(-180).map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
+        h(軸付きライン, { data: result.closes.slice(-180), labels: 解析用市場.slice(-180).map((r) => r.date.slice(5)), yLabel: 'ポイント' }),
       ),
 
       h('section', { className: 'grid' },
         h('article', { className: 'panel' },
-          h('h2', null, '予測と精度'),
+          h('h2', null, '予測と精度（リアルタイム反映後）'),
           h('div', { className: 'stats' },
             h('div', null, h('label', null, '翌営業日予測騰落率'), h('strong', null, `${数値(result.forecast.nextDayReturnPct, 3)}%`)),
             h('div', null, h('label', null, '翌営業日予測ポイント'), h('strong', null, `${数値(result.forecast.nextDayPrice, 2)} pt`)),
